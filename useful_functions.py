@@ -8,50 +8,82 @@ import random
 import time
 import pdb
 
+def imputeMedian(X_matrix):
+	"""
+	given a ndarray, loop through columns and impute missing values with median
+	median is computed ignoring the nan values in the column
+	"""
+	for i in range(X_matrix.shape[1]):
+		y_pred = X_matrix[:,i]
+		median_val = np.median(y_pred[~np.isnan(y_pred)])		
+		inds = np.where(np.isnan(y_pred))		
+		y_pred[inds]=median_val
+		X_matrix[:,i]=y_pred
+
+	return X_matrix
+
 def nearZeroVar(x_array, var_threshold):
 	"""
 	Given a ndarray, loop through columns and keep only those that have variance above var_threshold
+	var_threshold is the percent of constant values
+	return: a list of indices that needs to be removed
 	"""
-	x_train = x_array
-	for i in range(x_train.shape[1]):
-		temp_col = x_train[:,i]
+	#x_train = x_array
+	results = list()
+	for i in range(x_array.shape[1]):
+		temp_col = x_array[:,i]
 		temp_var = np.var(temp_col)
-		if temp_var <= (var_threshold*(1-var_threshold)):
-			x_train=np.delete(x_train, i, axis=1)
-	return x_train
-	
+		if temp_var < (var_threshold*(1-var_threshold)):
+			results.append(i)
+			#x_train=np.delete(x_train, i, axis=1)
+	return results
+	#return x_train
+
 def computeNan(df):
 	"""
-	This functions returns a list computing the %NaN for each feature given a dataframe
+	This functions returns a list computing the %NaN for each column given a dataframe
 	"""
 	results=list()
 	for col in df:
 		results.append(float(df[col].isnull().sum())/len(df))
 	return results
 
-def computeGinis(x, y):
+def computeGinis(X, y, weights=None):
 	"""
 	This function takes in two vectors
-	x: binary 0 and 1 labels
-	y: a vector of numbers, prediction_probabilities, or 0/1 predictions
+	y: binary 0 and 1 labels
+	X: a nd-array, feature values, prediction_probabilities, or 0/1 predictions
+	weight: numpy array that contains weight for computing weighted GINI. Weighted GINI is implemented in model_validation2.py
 
-	return: a list of gini scores
+	return: a list of gini scores computed using y vs Columns(X)
 	Note: absolute value of gini should be examined for selection
 	"""
-	from sklearn.metrics import roc_auc_score
-
 	gini_list = list()
 
-	for i in range(x.shape[1]):
-		## Implementing METHOD ONE of Handling missing values: removal of rows ### (BEGIN)
-		y_pred = x[:,i]
-		gini_list.append(2*roc_auc_score(y, y_pred) - 1)
+	if weights!=None:
+		import model_validation2 as mv
+
+		for i in range(X.shape[1]):
+			y_pred = X[:,i]
+			
+			dataset = np.array([y,y_pred,weights]).T
+			dataset = pd.DataFrame(dataset)
+			dataset.columns=list(['Y','score','weights'])
+
+			print 'Calculating Gini for feature %i' % i
+			gini_list.append(mv.gini(dataset))
+	else:
+		from sklearn.metrics import roc_auc_score
+
+		for i in range(X.shape[1]):
+			y_pred = X[:,i]
+			gini_list.append(2*roc_auc_score(y, y_pred) - 1)
 
 	return gini_list
 
 def obtain_dummy_cols(df):
 	"""
-	given a dataframe, obtain the dummy columns (remove the target label after)
+	given a dataframe, obtain the dummy columns (response is not considered a dummy column)
 	dummy column defined as having only 2 different values
 	"""
 	
@@ -94,3 +126,45 @@ def ridge_dummy_regression(X,y,x_test,lambda_val=None):
 	proba_lst = lr.predict_proba(x_test)[:,1]
 
 	return proba_lst
+
+def get_dummies_removeBase(df_train, df_test, level=10):
+	"""
+	### This function encodes categorial columns into dummy variables ###
+	### df_train and df_test are dataframe of all categorical features
+	### Determine number of levels. Take n-1 levels (to treat collinearity) ###
+	### Use pandas get_dummies for each column and remove the first ###
+	### AKA: One-Hot-Encoding ###
+	### Returns: a dataframe of all dummy columns
+	"""
+	print 'Running dummy label encoding....'
+	dummy_train=list()
+	dummy_test=list()
+	column_names=list()
+	for col in df_train:
+		
+		df_col=df_train[col]
+		levels=df_col.unique()
+
+		### DROP all levels > 50 (too much sparsity otherwise) ###
+		if (len(levels) <= 50):
+			print col
+			print df_col.unique()
+
+			levels=levels[:-1] #remove the last one (to treat collinearity)
+			for lvl in levels:
+				column_names.append(col+'_'+str(lvl))
+				train_lvl=np.array(df_train[col]==lvl).astype(int)
+				test_lvl=np.array(df_test[col]==lvl).astype(int)
+				dummy_train.append(train_lvl)
+				dummy_test.append(test_lvl)
+
+	dummy_train=np.array(dummy_train).T
+	dummy_test=np.array(dummy_test).T
+
+	dummy_train=pd.DataFrame(dummy_train)
+	dummy_train.columns=column_names
+
+	dummy_test=pd.DataFrame(dummy_test)
+	dummy_test.columns=column_names
+
+	return dummy_train, dummy_test
